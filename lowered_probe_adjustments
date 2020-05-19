@@ -17,8 +17,8 @@ library(imager)  # used for imwarp fxn
 ## It needs to be converted into a type that includes date, to align acoustic probe data.
 ## The final time used is a matlab format(?) The number of seconds since Jan 1, 1970... 
 
-CTD <- read.ctd.odf("CTD_2019001_069_1_UP.odf")              # read a single CTD files that coincides with WBAT profile
-CTD.data <- data.frame(CTD[["data"]])                          # select just the data portion
+CTD <- read.ctd.odf("CTD_2019001_069_1_DN.odf")  # read a single CTD files that coincides with WBAT profile
+CTD.data <- data.frame(CTD[["data"]])             # select just the data portion
 
 start_time <- CTD[["metadata"]]$startTime                         # collect the start time of the cast
 start_time_s <- period_to_seconds(lubridate::seconds(start_time))  # convert start time to seconds (timeY)
@@ -26,19 +26,19 @@ CTD.data$Time <- CTD.data$TIMS + start_time_s                       # add second
 
 ## Absorption coefficient profile correction
 
-wbat <- read.csv("ISECOLD2019_1_2000_38kHz.sv.csv", header=F)
+wbat <- read.csv("C:\\Users\\jchawars\\OneDrive - Memorial University of Newfoundland\\DFO Lab Sea\\Acoustics\\WBAT Export\\ISECOLD2019_1_2000_333kHz.sv.csv", header=F)
 wbat.meta <- wbat[2:dim(wbat)[1],1:13]      # select the metadata portion 
 colnames(wbat.meta) <- wbat[1,1:13]         # assign the headers to the metadata
 colnames(wbat.meta)[1] <- "Ping_index"      # rename the corrupt header name
 
-# convert the probe time to the same format as the CTD
-wbat.meta$datetime <- as.POSIXct(paste(wbat.meta$` Ping_date`, wbat.meta$` Ping_time` ), format="%Y-%m-%d %H:%M:%S", tz="UTC")
-wbat.meta$Time <- period_to_seconds(lubridate::seconds(wbat.meta$datetime)) + as.numeric(wbat.meta$` Ping_milliseconds`)*10^-3
+# convert the probe time to the same format as the CTD -- NOTE: ECHOVIEW 11 has fixed their export headers...
+wbat.meta$datetime <- as.POSIXct(paste(wbat.meta$Ping_date, wbat.meta$Ping_time), format="%Y-%m-%d %H:%M:%S", tz="UTC")
+wbat.meta$Time <- period_to_seconds(lubridate::seconds(wbat.meta$datetime)) + as.numeric(wbat.meta$Ping_milliseconds)*10^-3
 wbat.meta$Time <- as.character(round(wbat.meta$Time/0.5)*0.5) # round to nearest 0.5 seconds and convert to character for joining
 CTD.data$Time <- as.character(round(CTD.data$Time/0.5)*0.5)
 
 # introduce irradiance data
-light <- read.csv("Integrator_measurements.csv")
+light <- read.csv("C:\\Users\\jchawars\\OneDrive - Memorial University of Newfoundland\\DFO Lab Sea\\Irradiance Data\\Integrator_measurements.csv")
 light$Time <- period_to_seconds(seconds(as.POSIXct(light$iDate, tz="UTC")))
 light$Time <- as.character(round(light$Time/0.5)*0.5)
 
@@ -46,8 +46,9 @@ light$Time <- as.character(round(light$Time/0.5)*0.5)
 CTD.data <- light %>%
             dplyr::select(Time, Ham) %>%           # select only the time and HAM measurement
               right_join(.,CTD.data, by="Time")
-                            
-drop_cols <- c(" Distance_gps", " Distance_vl", " Distance_vl", " Latitude", " Longitude", " Depth_start", " Depth_stop", " Ping_date", " Ping_time")
+           
+                 
+drop_cols <- c("Distance_gps", "Distance_vl", "Distance_vl", "Latitude", "Longitude", "Depth_start", "Depth_stop", "Ping_date", "Ping_time")
 
 wbat.ctd <- wbat.meta %>% 
           left_join(., CTD.data, by="Time") %>%     # join ctd and wbat data.frames by matching time cases
@@ -62,17 +63,17 @@ temp <- wbat.ctd$temperature
 p <- wbat.ctd$pressure
 
 require(oce)
-c_new <- swSoundSpeed(salinity = sal,temperature = temp, pressure = p) # new sound speed based on CTD profile 
+c_new <- swSoundSpeed(salinity = sal,temperature = temp, pressure = p) # new sound speed
 
 # set constant variables from orginial calibration file -- These are all dependent on transducer type and default data colllection settings
 c <-1482.41             # original sound speed
-coeff_abs <- 0.0115     # original coefficient of absorption
-t <-1.022*10^-5         # PulseCompressedEffectivePulseLength (sec)
+coeff_abs <- 0.07696    # original coefficient of absorption
+t <-1.022 *10^-5         # PulseCompressedEffectivePulseLength (sec)
 y <- -21                # two-way beam angle  --- Adjust based on transducer (NOTE: only 38 kHz has sucha wide beam angle)
 
-  f_nominal <-38000 #nominal frequency    -- Adjust based on transducer
+  f_nominal <-333000 #nominal frequency    -- Adjust based on transducer
         
-f <- 40500 #center frequency
+f <- 370000 #center frequency
 equi_beam_angle <-10^((y+20*log(f_nominal/f))/10)          # calculate equivalent beam angle
 coeff_abs_new <-swSoundAbsorption(frequency= f_nominal,    # new absorption coefficient
                                   salinity = sal,
@@ -84,9 +85,9 @@ coeff_abs_new <-swSoundAbsorption(frequency= f_nominal,    # new absorption coef
 wbat.sv <- wbat[2:dim(wbat)[1], 14:dim(wbat)[2]]  # selects only the Sv matrix from the exported file
 
 # Set variables for range matrix calculation
-Range_start <- as.numeric(wbat.meta$` Range_start`)[1] # all values in the df are the same.
-Range_stop <- as.numeric(wbat.meta$` Range_stop`)[1]
-Sample_count <- as.numeric(wbat.meta$` Sample_count`)[1]
+Range_start <- as.numeric(wbat.meta$Range_start)[1] # all values in the df are the same.
+Range_stop <- as.numeric(wbat.meta$Range_stop)[1]
+Sample_count <- as.numeric(wbat.meta$Sample_count)[1]
 
 # calculate range for each horizontal sample
 wbat.range <- sapply(1:dim(wbat.sv)[1], function(i) Range_start + ((Range_stop-Range_start)/Sample_count)*(i+0.5))    
@@ -125,14 +126,15 @@ colnames(Sv_old_ci) <- c("Estimate_old", "lowCI_old", "highCI_old", "stderr_old"
 wbat.ctd <- cbind(wbat.ctd, Sv_old_ci, Sv_new_ci)
 wbat.ctd$wbat_site <- "ISECOLD_1_2000"
 wbat.ctd$ctd_site <- "1901_069"
-wbat.ctd$Frequency <- "38 kHz"
+wbat.ctd$Frequency <- "333 kHz"
 
-write.csv(wbat.ctd, "ISECOLD_1_2000_wbat_ctd69_38khz.csv")
+write.csv(wbat.ctd, "ISECOLD_1_2000_wbat_ctd69_333khz.csv")
 wbat.ctd <- read.csv("ISECOLD_1_2000_wbat_ctd69_38khz.csv")
 
 ## Plotting the corrected mean Sv value as a profile ##
 
 Sv_label <- expression(paste("Mean S"["v"]," [dB re 1 m" ^-1,"]"))
+d_scale <- seq(0, max(wbat.ctd$pressure), 200) # set depth scale for plotting
 
 # comparison plot -- this plot shows both the original and the adjusted mean Sv value for the profile
 sv.plot <-  ggplot(wbat.ctd, aes(x=pressure, y=Estimate_new)) + 
@@ -149,6 +151,7 @@ sv.plot <-  ggplot(wbat.ctd, aes(x=pressure, y=Estimate_new)) +
           coord_flip()+ scale_x_reverse(breaks=d_scale) + labs(x= "Pressure [dBar]", y=Sv_label) +
           theme_bw()
 
+
 ## Plotting a depth-referenced echogram from acoustic probe ##
 require(imager)
 echogram <- as.cimg(Sv_new)  # converts Sv matrix into an image file
@@ -158,7 +161,6 @@ echo.shift[echo.shift > -10] <- NA
 echo.small <- as.data.frame(resize(echo.shift,round(width(echo.shift)/5),round(height(echo.shift)/5),  # reduces the Sv matrix to roughly 4% size for easy plotting
                                    interpolation_type = 2)) # interpolates using a moving average interpolation
 
-d_scale <- seq(0, max(wbat.ctd$pressure), 200) # set depth scale for plotting
 
 echoplot <- ggplot(echo.small, aes(x*5, y/4)) +  
               geom_raster(aes(fill=value)) +
@@ -196,4 +198,6 @@ Ham.plot <- ggplot(wbat.ctd, aes(x=pressure, y=Ham)) + geom_line(colour="purple"
                     theme_bw()# + theme(axis.title.y=element_blank(), axis.text.y=element_blank())
                 
 plot_grid(echoplot, sv.plot, T.plot, S.plot, Ham.plot,  nrow=1, ncol=5,rel_widths = c(2, 1, 1, 1, 1))
+
+
 
