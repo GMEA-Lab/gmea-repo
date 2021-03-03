@@ -1,0 +1,374 @@
+---
+title: "Simba_Data"
+author: "Jen H"
+date: "January 12, 2021"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## SIMBA
+This code looks at the data from the SIMBA ice chain that was deployed near Qik during Feb-June 2020 and attempts to determine the air/snow and water/ice interfaces
+
+```{r results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate) #makes it easier to deal with date/times
+#get data from github
+#Simba<-read_csv(url("https://raw.githubusercontent.com/jchawarski/ITO_Qik2020/main/SIMBA/uit0201td_2020-11-04_14-21-24.csv"))
+#or get from project folder
+Simba<-read_csv("SimbaData_UIT0201.csv")
+str(Simba)
+```
+##
+There are 663 observations with 252 variables. Variables include:
+msgtype-Numeric values that represent what kind of message is being received here (10,11,or 14)
+        10 is the unheated temperature profile
+        11 is the change (positive is a rise) relative to the initial temperature at HST1
+        14 is the change relative to the initial temperature at HST1+HST2+HST3+HST4. Heater off.
+SendTime-Time of sample according to the SIMBA unit clock
+H_MeasureTime-Total time of heating for heating cycles from start of heating (in seconds). 
+              Here 0(msgtype=10), 60s(msgtype=11), 120s(msgtype=14)
+T0-T239-temps for sensors T0-T239, each are 2cm apart
+AirTemp-the air temperature
+
+Generally, there are 6 temperature readings per day.There are unheated temperature readings sent 4 times per day, every 6 hours. There are 2 additional readings sent per day of the heated temperature readings (msgtype 11,14)
+
+
+Change send time to a usable date time format and select only the days we are interested in (end of Feb-end of June 2020)
+##
+```{r}
+Simba$SendTime2<-dmy_hm(Simba$SendTime,tz="UTC")
+
+min(Simba$SendTime2) 
+max(Simba$SendTime2)  #only goes through beginning of June, malfunctioned bc in melt pond
+Simba2<-Simba %>% filter(SendTime2 > "2020-02-24 18:00:00")
+
+```
+
+
+##Air Temp
+Let's look at air temp first, filter for msgtype 10 because that's the unheated temp.
+
+```{r}
+AirTemp<-Simba2 %>% filter(msgtype==10) %>% select(AirTemp, SendTime2)
+hist(Simba2$AirTemp) #just quickly looking I don't really see any outliers
+summary(AirTemp$AirTemp)
+max(Simba2$AirTemp, na.rm = T)
+AirTemp_plot<-ggplot(AirTemp, aes(SendTime2, AirTemp)) + 
+  geom_line(color="dodgerblue3", size=1)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  xlab("Date")+ylab("Air Temperature (C)")+
+  labs(title="Simba Air Temperature Readings 25Feb-02June 2020")
+plot(AirTemp_plot)
+
+```
+
+
+##Air/Snow/Ice/Water Layers
+
+```{r}
+#look at rest of temperature sensors
+Simba_long<-Simba2 %>% filter(msgtype==10) %>% select(SendTime2, 12:251)
+#need to convert from wided df to long
+Simba_long<-Simba_long %>% pivot_longer(
+                                        cols=2:241,
+                                        names_to="Measurement",
+                                        values_to="Temp")
+hist(Simba_long$Temp) #some -90s values I think
+summary(Simba_long$Temp) #hmmm max 10 seems incorrect if max air temp was ~2.5C...and 720 NAs
+
+#looking at some of the values from the sensors
+Simba_NA<-Simba_long %>% filter(is.na(Temp)) %>% group_by(SendTime2) %>% summarise(tot=n())
+#NAs in 2020-03-15, 2020-04-02, 2020-05-01, 2020-05-14....also for some reason there's extra data on the 14th at 00:00:00
+#March 15th had a double at 1800 so theres still data for that time period
+
+Simba_cold<-Simba_long %>% filter(Temp< -90) #all on the second of June which is when it stopped recording data and prob malfunctioned bc it was in an melt pond
+Simba_Hot<-Simba_long %>% filter(Temp>3) #since air temp max=2.8, seems to be the end of april through june some of the sensors are quite warm
+#going to make a new datset 
+Simba_long2<-Simba2 %>% filter(msgtype==10) %>% select(SendTime2, 12:251)
+#so really cold temps to -30 through T241 on feb 25th and 26th but not 27th, which makes me think it was out of the water until the 27th
+Simba_long2<- Simba_long2 %>% filter(SendTime2 > "2020-02-26 18:00:00" & SendTime2< "2020-05-31 21:00:00")
+summary(Simba_long2$SendTime2)
+#first going to get rid of those duplicated rows on the 14th
+Simba_long2<-Simba_long2[!duplicated(Simba_long2),] #gets rid of the 2 duplicates
+#And the March 15th has some weird duplicate as well for 18:00:00, one row has full set of data one row has NAs
+Simba_long2<-Simba_long2 %>% filter(!(is.na(T0) & date(SendTime2)=="2020-03-15 18:00:00"))
+#convert from wide to long
+Simba_long2<-Simba_long2 %>% pivot_longer(
+  cols=2:241,
+  names_to="Measurement",
+  values_to="Temp")
+class(Simba_long2)
+Simba_long2<-as.data.frame(Simba_long2)
+```
+
+
+```{r results='hide', message=FALSE, warning=FALSE}
+#now what to do about the missing data...
+#the zoo package can interpolate and/or extrapolate missing data
+library(zoo)
+#make numeric measurement variable
+Simba_long2$Measurement2<-as.numeric(str_remove(Simba_long2$Measurement, "[T]"))
+##
+Simba_long3<- Simba_long2 %>% mutate(Date=date(SendTime2))%>% group_by(Date, Measurement2)%>% arrange(SendTime2, .by_group=T) %>%
+                 mutate(Temp2=na.spline(Temp, na.rm=F)) 
+#na.spline can deal with leading NAs and bc hourly temperature has a daily cycle to it typically
+approxtest<-Simba_long3 %>% filter(date(SendTime2)=="2020-04-02") #so I think that worked
+
+Simba_long3<-as.data.frame(Simba_long3)
+```
+
+```{r}
+ggplot(Simba_long3, aes(SendTime2, Measurement2, fill= Temp2)) + 
+  geom_tile()+
+  scale_fill_gradientn(colors=c("navyblue","blue2","dodgerblue2","green4","yellow3",
+                                "orange3","orangered3","red","violetred2"))+
+  scale_y_continuous(trans = "reverse", expand = c(0, 0)) +
+  scale_x_datetime(expand=c(0,0))+
+  geom_hline(yintercept=78, linetype="dashed", color = "white")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(title="Simba Temperature Readings 26Feb-31May2020", fill="Temp (C)",
+       x="Date",y="Measurement")
+```
+
+##
+According to the report, the top of thermistor chain was measured at 1.58m from the ice. If every sensor is 2 cm apart then the top of the ice should be at about sensor 78 (since it starts at T0). This is represented by the white horizontal line in the plot
+
+From just the temperature alone it is difficult to see the interfaces. Jackson et al (2013) and Liao et al (2018) suggest looking at the heat sensor temps because the rise of temp at 120s of heating is ~2C in air, 0.4C in ice and 0.6C in water. We can also look at the ratio between the two sensors but they don't really give any general rules (nor is the fig isn't helpful for our data) like they do for the heat sensor temps
+
+##
+```{r}
+Simba_heat<-Simba2 %>% filter(msgtype==14) %>% select(SendTime2, 12:251)
+Simba_heat<- Simba_heat %>% filter(SendTime2 > "2020-02-26 18:00:00" & SendTime2< "2020-05-31 21:00:00")
+
+Simba_heat<-Simba_heat %>% pivot_longer(
+  cols=2:241,
+  names_to="Measurement",
+  values_to="Temp_14")
+
+Simba_heat<-as.data.frame(Simba_heat)
+
+Simba_heat$Measurement2<-as.numeric(str_remove(Simba_heat$Measurement, "[T]"))
+
+ggplot(Simba_heat, aes(SendTime2, Measurement2, fill= Temp_14)) + 
+  geom_tile()+
+  scale_fill_gradientn(colors=c("navyblue","blue2","dodgerblue2","green4","yellow3",
+                                "orange3","orangered3","red"))+
+  scale_y_continuous(trans = "reverse", expand = c(0, 0)) +
+  scale_x_datetime(expand=c(0,0))+
+  geom_hline(yintercept=78, linetype="dashed", color = "white")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(title="Simba Heat Sensor Readings 120s 27Feb-31May2020", fill="Temp (C)", 
+       x="Date",y="Measurement")
+
+```
+
+From the plot of the heated sensor data it seems like our ice interface starts higher than T78, more like sensor 68 or 69. Can also kind of see the snow/air interface.
+
+It also appears that while the rise of temp is greater in air than water or ice, it is >2 deg rather than ~2
+
+Liao et al 2018 suggests looking at the diff in temperature bt 2 sensors and showed that 
+|delta T Snow| >= 0.4375, snow/air interface=0.4375
+0.1875>=|delta T Ice| <= 0.0625, air/ice interface=0.1875
+
+The temperature of seawater close to the ice bottom is stable near freezing point (-2C), thus the min temp b/t 2 adjoining sensors in seawater is .03-.09 (Liao et al 2018)
+
+So look at the difference between sensors
+```{r}
+Simba_long3<-Simba_long3 %>%  group_by(SendTime2) %>% 
+                 mutate(Diff=abs(Temp2 - lead(Temp2, order_by = Measurement2)))
+
+Simba_long3<-as.data.frame(Simba_long3)
+
+ggplot(Simba_long3, aes(SendTime2, Measurement2, fill= Diff)) + 
+  geom_tile()+
+  scale_fill_gradientn(colors=c("navyblue","blue2","dodgerblue2","green4","yellow3",
+                                "orange3","orangered3","red"))+
+  scale_y_continuous(trans = "reverse", expand = c(0, 0)) +
+  scale_x_datetime(expand=c(0,0))+
+  geom_hline(yintercept=78, linetype="dashed", color = "white")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(title="Simba Readings Diff 26Feb-31May2020",
+       fill="Temp (C)", x="Date",y="Measurement")
+```
+
+Again, it seems like the ice surface was higher than I originally thought. The snow interface seems a little easier to see now. 
+
+So using some of the rules from Liao et al (2018) and Jackson et al (2013) try to define interface. After visually assessing the data, it does seem like the differences between sensors and the heated sensor temp at 120s are a little diff than those suggested, but I think I can still string together some rules to define the interfaces (hopefully) using the diff and the heated sensor temp at 120s
+
+
+```{r}
+#unfort heated temps only get taken 1time per day,but for now going to apply them to the whole day...
+Simba_heat<-Simba_heat %>% mutate(Date=date(SendTime2)) %>% select(-(SendTime2))
+
+Simba_long3<-Simba_long3 %>% mutate(Date=date(SendTime2)) %>%
+  left_join(Simba_heat) 
+
+#in Liao et al they use the mode of the bottom 30 temperatures as the water temp and the first temp colder than that is the ice bottom. However, there are often 2 values for the mode some I'm going to use max and min
+BotTemps<-Simba_long3 %>% filter(Measurement2>208) %>% group_by(SendTime2) %>% summarize(Min_BotTemp=min(Temp2), Max_BotTemp=max(Temp2))
+
+Simba_long3<-left_join(Simba_long3, BotTemps)
+
+#Find ice bottom by searching backwards for the first temp to < the min water temp
+Simba_long3<-Simba_long3 %>% group_by(SendTime2) %>% 
+              arrange(SendTime2,desc(Measurement2)) %>%
+              mutate(medium=case_when(Measurement2==239~"Water",
+                    Temp2 >= Min_BotTemp & Temp2 <= Max_BotTemp~"Water"),
+             medium=ifelse(is.na(medium) & Temp2<Min_BotTemp & lag(medium)=="Water","Ice",
+                    medium),
+            medium=ifelse(is.na(medium) & lag(medium)=="Ice","Ice",medium))
+#doesn't fill in the missing blanks but I think that's ok, we only need to mark the interfaces
+
+Ice_Bottom<-Simba_long3 %>% 
+  group_by(SendTime2) %>% arrange(SendTime2,desc(Measurement2)) %>%
+  filter(medium == "Ice" & is.na(lead(medium,2))) %>%
+  filter(Measurement2==max(Measurement2))  
+
+
+#Find the ice top
+Simba_long3<-Simba_long3 %>%group_by(SendTime2) %>% 
+  arrange(SendTime2,Measurement2) %>%
+  mutate(medium=ifelse(Measurement2==0|Measurement2==-1,"Air",
+                ifelse(Diff<0.4375 & Temp_14>1.5,"Air", medium)),
+         medium=ifelse(is.na(medium) & Diff>=0.4375 & Measurement2<75,"Snow", medium),
+         medium=ifelse(is.na(medium)& Diff<=0.1875 & lag(medium)=="Air" & Measurement2<75,"Ice",
+                ifelse(is.na(medium)& Diff<=0.1875 & lag(medium)=="Snow" & Measurement2<75,"Ice",medium)))
+
+Ice_Top<-Simba_long3 %>% 
+  group_by(SendTime2) %>% arrange(SendTime2,Measurement2) %>%
+  filter(medium == "Ice" & Measurement2<75) %>% filter(Measurement2==max(Measurement2)) 
+
+#a few wonky measurements I'll need to go through and fix and a few are missing but I think that's ok bc ultimately we just want to know where the snow starts and the ice stops I think
+
+#see what that looks like
+ggplot(Simba_long3, aes(SendTime2, Measurement2, fill= Temp2)) + 
+  geom_tile()+
+  scale_fill_gradientn(colors=c("navyblue","blue2","dodgerblue2","green4","yellow3",
+                                "orange3","orangered3","red"))+
+  scale_y_continuous(trans = "reverse", expand = c(0, 0)) +
+  scale_x_datetime(expand=c(0,0))+
+  geom_line(data=Ice_Top, aes(x=SendTime2, y=Measurement2), size=.5,color = "white")+
+  geom_line(data=Ice_Bottom, aes(x=SendTime2, y=Measurement2), size=.5,color = "white")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+ labs(title="Simba Readings Temp 27Feb-31May2020", fill="Temp (C)",
+      x="Date",y="Measurement")
+
+```
+
+
+Not too bad. Has a few places that need to be fixed (ie ice top in april). At the begining I think the bore hole is refreezing which is why it looks a little funky and at the very end there's the melt pond and I'm not sure how to account for that 
+
+Ice estimates look fairly reasonable based on nearby Siku meausrements
+
+But when we look at snow...lots of weird outliers, that I wonder if it's bc if it's snowing, snow blowing gets stuck to the chain...?
+```{r}
+Snow<-Simba_long3 %>% filter(medium=="Snow") %>% filter(Measurement2==min(Measurement2))
+
+ggplot(Simba_long3, aes(SendTime2, Measurement2, fill= Diff)) + 
+  geom_tile()+
+  scale_fill_gradientn(colors=c("navyblue","blue2","dodgerblue2","green4",
+                                "yellow3","orange3","orangered3","red"))+
+  scale_y_continuous(trans = "reverse", expand = c(0, 0)) +
+  scale_x_datetime(expand=c(0,0))+
+  geom_line(data=Ice_Top, aes(x=SendTime2, y=Measurement2), size=.5,color = "white")+
+  geom_line(data=Ice_Bottom, aes(x=SendTime2, y=Measurement2), size=.5,color = "white")+
+  geom_line(data=Snow, aes(x=SendTime2, y=Measurement2), size=.5,color = "white")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(title="Simba Readings Diff 27Feb-31May2020", fill="Temp (C)",
+       x="Date",y="Measurement")
+
+
+```
+
+
+
+```{r}
+#ooof ok, so looking at siku data there was never more than 32cm of snow on the ground.
+#Although not in the same location, perhaps it's safe to assume there was never >40 
+#(20 sensors), so make a new snow layer with some cutoffs
+Snow<-Simba_long3 %>% filter(medium=="Snow" & Measurement2>49 & lead(medium,2)=="Snow") %>% filter(Measurement2==min(Measurement2))
+
+##still outliers in some of the layers
+Layers<-as.data.frame(unique(Simba_long3$SendTime2))
+Layers<-Layers %>% rename(SendTime2= `unique(Simba_long3$SendTime2)`)
+Layers<-merge(Layers, Snow[,c("SendTime2", "Measurement2")], all.x=T)
+Layers<-Layers %>% arrange(SendTime2) %>% mutate(Snow2=na.approx(Measurement2, na.rm=F)) %>% rename(Snow=Measurement2)
+Layers<-merge(Layers, Ice_Bottom[,c("SendTime2", "Measurement2")], all.x=T)
+Layers<-Layers %>% rename(Ice_Bottom=Measurement2)
+Layers<-merge(Layers, Ice_Top[,c("SendTime2", "Measurement2")], all.x=T)
+Layers<-Layers %>% rename(Ice_Top=Measurement2) %>%  mutate(Ice_Top2=ifelse(Ice_Top<55,NA,Ice_Top),                                                           Ice_Top2=na.approx(Ice_Top2, na.rm=F))
+Layers<-Layers %>% mutate(Diff=abs(Snow2-Ice_Bottom)*2)
+
+summ<-Simba_long3 %>% ungroup() %>%
+  summarise(mean_Diff=mean(Diff,na.rm=T), sd_Diff=sd(Diff,na.rm=T), tot=n())%>%
+  mutate(se_Diff=sd_Diff/(sqrt(tot))) 
+0.1+(1.96*.0005)   #rather than setting values outside CI to top 95% might set to 0.5 since diff between sensors in snow=>0.4528 and those should be the greatest diff bt sensors      
+
+Simba_long3$Diff_smooth<-with(Simba_long3, ifelse(Diff>0.4528,0.5,Simba_long3$Diff))
+
+
+ggplot(Simba_long3, aes(SendTime2, Measurement2)) + 
+  geom_tile(aes(fill=Diff))+
+  scale_fill_gradientn(colors=c("navyblue","blue2","dodgerblue2","green4","yellow3",
+                                "orange3","orangered3","red"))+
+  scale_y_continuous(trans = "reverse", expand = c(0, 0)) +
+  scale_x_datetime(expand=c(0,0))+
+  geom_line(data=Layers, aes(x=SendTime2, y=Snow2), size=.5,color = "white")+
+  geom_line(data=Layers, aes(x=SendTime2, y=Ice_Top2), size=.5,color = "white")+
+  geom_line(data=Layers, aes(x=SendTime2, y=Ice_Bottom), size=.5,color = "white")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(title="Simba Readings Diff 27Feb-31May2020", fill="Temp (C)",
+       x="Date",y="Measurement")
+
+
+ggplot(Simba_long3, aes(SendTime2, Measurement2)) + 
+  geom_tile(aes(fill=Diff_smooth))+
+  scale_fill_gradientn(colors=c("navyblue","blue2","dodgerblue2","green4","yellow3",
+                                "orange3","orangered3","red"))+
+  scale_y_continuous(trans = "reverse", expand = c(0, 0)) +
+  scale_x_datetime(expand=c(0,0))+
+  geom_line(data=Layers, aes(x=SendTime2, y=Snow2), size=.5,color = "white")+
+  geom_line(data=Layers, aes(x=SendTime2, y=Ice_Top2), size=.5,color = "white")+
+  geom_line(data=Layers, aes(x=SendTime2, y=Ice_Bottom), size=.5,color = "white")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  labs(title="Simba Readings Smooth Diff 27Feb-31May2020", fill="Temp Diff Smoothed (C)",
+       x="Date",y="Measurement")
+
+
+
+ggplot(Layers, aes(SendTime2, Diff)) + 
+  geom_line(color="dodgerblue3", size=1)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  xlab("Date")+ylab("Snow Ice Thickness (cm)")+
+  labs(title="Simba Snow Ice Thickness 27Feb-31May2020")
+
+```
+
+
+I think this breaks down near the end of May. I think the past research was done in pretty consistent cold temps, and the rules they suggest may not hold when it starts too get warm. The last day obv needs some work as well. I assume there wasn't much snow towards the end of may for it to have been sitting in an ice melt pond on the 2nd and to have malfunctioned. Need to determine layer of snow and ice for the last few days somehow. 
+
+
+```{r}
+test<-Simba_heat %>%filter(Measurement2<69)
+test2<-Simba_long3 %>%filter(Measurement2<69)
+Layers<-Layers %>% mutate(SnowDepth=abs(Snow2-Ice_Top2)*2, IceDepth=abs(Ice_Bottom-Ice_Top2)*2)
+```
+
+
+
+
+

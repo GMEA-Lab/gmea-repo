@@ -1,0 +1,34 @@
+Jen Herbig
+Jan2021
+
+##Note these codes are not 100% finished bc we decided not to use these data as a lab project
+##Hopefully the codes will help you as a starting place
+
+Background:
+This is the project folder associated with data from the SIMBA chain in Qik.from 27Feb-2June2020
+|
+|- Simba.Rproj 	# The project file
+|
+|- Description.txt 	    # You're reading it.
+|
+|- Notes.txt 	    # Some thoughts about the snow/ice layers
+|
+|- Simba3.R             # R script to look at data from SIMBA and assign ice and snow layers messier than mrkdown
+|
+|- SIMBA_MKD.RMD             # R markdown file that is similar to Simba3.R but has less data exploration and is a little cleaner
+|  +SIMBA_MKD                #Chrome HMTL file from MKD files
+|
+|-lunar_phase       #not related to SIMBA but I thought it would be interesting to look at the lunar phase a variable to explain patterns, this code is a start to add that variable
+|
+|- SimbaData_UIT0201.csv    #The raw SIMBA data consisting of temperature measurements and heated sensor readings (see R code for more detailed description of variables) 
+|
+|-Figures/                 #figures from Simba3.R showing the temperature profile and ice and snow layers
+|
+|- R_Output/    
+|  +- Layers.csv # The depth of snow and ice throughout the time series 
+|  +- Simba_AirTemp # AirTemp from the Simba air temp sensor
+|
+|- Literature/   #papers referenced in Simba3.R used to decide snow/ice layers, and Simba manuel          
+|  
+
+
