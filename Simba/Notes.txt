@@ -1,0 +1,23 @@
+##Notes about estimated snow and ice layers
+##This code is still a work in progress....below are some thoughts
+
+##I decided how to label snow vs ice vs air vs water based on previous research (see lit. folder).
+##However I think this research was done mostly in the cold and so the rules they suggest may break 
+##down when it's warmer (ie may). May need to reassess the snow/ice interfaces when it gets warmer but I'm not sure how to.
+
+##The temps are available every 6h, however there are some time periods missing. I have interpolated those missing data.
+
+##The sensor readings are only available 1x per day, so they were applied to each time period. 
+##So may just want to look into using only the time period for which they are available (which I think is 18:00)
+
+##Right now the estimates are for every 6h, may want to look into using just daily values since that would give less variation
+
+##The snow/air interface couldn't be estimated for every time period (especially in the end) so I interpolated between estimates. Again not sure if this was best practice...?
+##But it seemed like the finer the resolution to correlate with fish/zoop density the better?
+
+##snow/ice measurements can be compared to nearby measurements:
+https://siku.org/app#/map/home-feed?sidebar=1&lat=73.00486244645248&lng=-78.72485059573724&z=7&satId=topo
+https://climate.weather.gc.ca/climate_data/daily_data_e.html?hlyRange=2005-04-20%7C2021-02-08&dlyRange=2005-03-01%7C2021-02-07&mlyRange=2005-04-01%7C2007-11-01&StationID=42803&Prov=NU&urlExtension=_e.html&searchType=stnName&optLimit=yearRange&StartYear=1840&EndYear=2021&selRowPerPage=25&Line=4&searchMethod=contains&txtStationName=qikiqtarjuaq&timeframe=2&Day=8&Year=2020&Month=3
+https://climate.weather.gc.ca/climate_data/daily_data_e.html?hlyRange=2004-12-16%7C2021-02-08&dlyRange=2004-05-25%7C2021-02-07&mlyRange=2005-03-01%7C2007-11-01&StationID=42503&Prov=NU&urlExtension=_e.html&searchType=stnName&optLimit=yearRange&StartYear=1840&EndYear=2021&selRowPerPage=25&Line=3&searchMethod=contains&txtStationName=iqaluit&timeframe=2&Day=8&Year=2020&Month=5#
+
+##I am worried about the snow depths, the ice I think is pretty good (except for the end of May)
